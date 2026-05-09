@@ -105,9 +105,22 @@
     <label style="color:#aaa;font-size:0.75rem;font-weight:600;display:block;margin-bottom:0.4rem;">URL WebDAV du programme (NAS)</label>
     <input id="setup-url" type="url" placeholder="http://100.x.x.x:5006/muscu/programmes/programme_fullbody_nov2025.json"
       style="width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;padding:0.7rem;font-size:0.85rem;margin-bottom:1rem;">
+    <div style="border-top:1px solid #222;padding-top:0.9rem;margin-bottom:1rem;">
+      <div style="color:#666;font-size:0.68rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:0.7rem;">Accès données — charges &amp; historique</div>
+      <input id="setup-base" type="url" placeholder="https://nas-syno.tail87964f.ts.net:5006/muscu/"
+        style="width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;padding:0.7rem;font-size:0.85rem;margin-bottom:0.5rem;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
+        <input id="setup-wduser" type="text" placeholder="Utilisateur"
+          style="background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;padding:0.7rem;font-size:0.85rem;box-sizing:border-box;">
+        <input id="setup-wdpass" type="password" placeholder="Mot de passe"
+          style="background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;padding:0.7rem;font-size:0.85rem;box-sizing:border-box;">
+      </div>
+    </div>
     <button onclick="saveSetupUrl()" style="width:100%;background:#e8001d;color:#fff;border:none;border-radius:8px;padding:0.8rem;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:0.05em;cursor:pointer;">CONNECTER</button>
-    <div style="text-align:center;margin-top:1rem;">
-      <span onclick="useLocalFallback()" style="color:#555;font-size:0.75rem;cursor:pointer;text-decoration:underline;">Utiliser sans NAS (localStorage uniquement)</span>
+    <div style="text-align:center;margin-top:0.8rem;display:flex;justify-content:center;gap:1.5rem;">
+      <span onclick="useLocalFallback()" style="color:#555;font-size:0.75rem;cursor:pointer;text-decoration:underline;">Sans NAS</span>
+      <span onclick="importProgramme()" style="color:#555;font-size:0.75rem;cursor:pointer;text-decoration:underline;">Importer programme JSON</span>
+      <span id="setup-close" onclick="hideSetup()" style="color:#555;font-size:0.75rem;cursor:pointer;text-decoration:underline;display:none;">Fermer</span>
     </div>
   </div>
 </div>
@@ -117,7 +130,7 @@
 <div id="app">
   <div class="hdr">
     <div><h1 id="appTitre">MUSCULATION</h1><div class="sub" id="appSoustitre">Basic Fit · 3×/semaine</div></div>
-    <div style="text-align:right"><div class="prog-lbl" id="progLbl">0 / 0</div><div class="sub">séries · <span onclick="resetSeance()" style="color:#666;cursor:pointer;text-decoration:underline">reset</span></div></div>
+    <div style="text-align:right"><div class="prog-lbl" id="progLbl">0 / 0</div><div class="sub">séries · <span onclick="resetSeance()" style="color:#666;cursor:pointer;text-decoration:underline">reset</span> · <span onclick="openConfig()" style="color:#666;cursor:pointer;text-decoration:underline">config</span></div></div>
   </div>
   <div class="snav">
     <button class="snav-btn active" onclick="showSeance(0)">Séance A</button>
@@ -537,6 +550,8 @@ function updateProgress(){
 
 function resetSeance(){
   if(!confirm('Remettre la séance à zéro ?')) return;
+  const entry=buildHistEntry();
+  if(entry) saveHistorique(entry);
   setsState={};
   cursor={ei:1,si:0};
   resetTimer();
@@ -554,6 +569,7 @@ function setCharge(ei,val){
   const k=`charge-${curSeance}-${ei}`;
   if(val===''||val===null) localStorage.removeItem(k);
   else localStorage.setItem(k,val);
+  saveCharges();
 }
 function editCharge(ei,e){
   e.stopPropagation();
@@ -569,6 +585,69 @@ function showToast(msg){
   const t=document.getElementById('toast');
   t.textContent=msg;t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'),1800);
+}
+
+// ── WEBDAV SYNC ───────────────────────────────────────────────
+function wdBase(){return(localStorage.getItem('fb_webdav_base')||'').replace(/\/?$/,'/');}
+function wdHeaders(){
+  const u=localStorage.getItem('fb_webdav_user'),p=localStorage.getItem('fb_webdav_pass');
+  if(!u)return{};
+  return{Authorization:'Basic '+btoa(unescape(encodeURIComponent(u+':'+p)))};
+}
+async function wdGet(path){
+  const b=wdBase();if(!b)return null;
+  try{const r=await fetch(b+path,{headers:wdHeaders()});if(!r.ok)return null;return await r.json();}
+  catch(e){return null;}
+}
+async function wdPut(path,data){
+  const b=wdBase();if(!b)return false;
+  try{
+    const r=await fetch(b+path,{method:'PUT',headers:{...wdHeaders(),'Content-Type':'application/json'},body:JSON.stringify(data,null,2)});
+    return r.ok||r.status===201;
+  }catch(e){return false;}
+}
+async function loadCharges(){
+  const data=await wdGet('data/charges.json');
+  if(!data)return;
+  Object.entries(data).forEach(([si,exs])=>{
+    Object.entries(exs).forEach(([ei,val])=>{
+      const k=`charge-${si}-${ei}`;
+      if(!localStorage.getItem(k))localStorage.setItem(k,val);
+    });
+  });
+}
+async function saveCharges(){
+  const b=wdBase();if(!b)return;
+  const out={};
+  for(let si=0;si<3;si++){
+    out[si]={};
+    if(seances&&seances[si]){
+      seances[si].exercices.forEach((_,ei)=>{
+        const v=localStorage.getItem(`charge-${si}-${ei}`);
+        if(v)out[si][ei]=v;
+      });
+    }
+  }
+  wdPut('data/charges.json',out);
+}
+async function saveHistorique(entry){
+  const b=wdBase();if(!b)return;
+  const hist=await wdGet('data/historique.json')||[];
+  hist.push(entry);
+  wdPut('data/historique.json',hist);
+}
+function buildHistEntry(){
+  if(!seances)return null;
+  const s=seances[curSeance];if(!s)return null;
+  return{
+    date:new Date().toISOString().slice(0,10),
+    seance:curSeance,seanceLabel:s.label,
+    exercices:s.exercices.filter(ex=>!ex.isWarmup).map(ex=>{
+      const ei=s.exercices.indexOf(ex);
+      const done=(setsState[`${curSeance}-${ei}`]||[]).filter(Boolean).length;
+      return{num:ex.num,name:ex.name,sets:done,charge:getCharge(ei)||null};
+    })
+  };
 }
 
 let seances = null;
@@ -597,10 +676,20 @@ async function loadProgramme() {
   return false;
 }
 
-function showSetup() {
+function showSetup(fromApp) {
+  const su=document.getElementById('setup-url');
+  const sb=document.getElementById('setup-base');
+  const swu=document.getElementById('setup-wduser');
+  if(programmeUrl) su.value=programmeUrl;
+  const b=localStorage.getItem('fb_webdav_base');
+  const u=localStorage.getItem('fb_webdav_user');
+  if(b) sb.value=b;
+  if(u) swu.value=u;
+  document.getElementById('setup-close').style.display=fromApp?'inline':'none';
   document.getElementById('setup-screen').classList.remove('hidden');
   document.getElementById('app-screen').classList.add('hidden');
 }
+function openConfig(){ showSetup(true); }
 
 function hideSetup() {
   document.getElementById('setup-screen').classList.add('hidden');
@@ -612,6 +701,12 @@ async function saveSetupUrl() {
   if (!url) return;
   programmeUrl = url;
   localStorage.setItem('fb_programme_url', url);
+  const base=document.getElementById('setup-base').value.trim();
+  const wduser=document.getElementById('setup-wduser').value.trim();
+  const wdpass=document.getElementById('setup-wdpass').value;
+  if(base) localStorage.setItem('fb_webdav_base', base.endsWith('/')?base:base+'/');
+  if(wduser) localStorage.setItem('fb_webdav_user', wduser);
+  if(wdpass) localStorage.setItem('fb_webdav_pass', wdpass);
   const ok = await loadProgramme();
   if (ok) {
     // Mettre en cache pour mode hors ligne
@@ -631,6 +726,30 @@ async function saveSetupUrl() {
 }
 
 
+function importProgramme(){
+  const input=document.createElement('input');
+  input.type='file';input.accept='.json';
+  input.onchange=async e=>{
+    const file=e.target.files[0];if(!file)return;
+    try{
+      const text=await file.text();
+      const data=JSON.parse(text);
+      if(!data.seances) throw new Error('Format invalide');
+      seances=data.seances;
+      localStorage.setItem('fb_programme_cache',JSON.stringify(data));
+      await wdPut('programmes/'+file.name,data);
+      try{
+        if(data.meta&&data.meta.titre) document.getElementById('appTitre').textContent=data.meta.titre;
+        if(data.meta&&data.meta.soustitre) document.getElementById('appSoustitre').textContent=data.meta.soustitre;
+      }catch(e){}
+      hideSetup();
+      renderSeance();
+      showToast('Programme importé ✓');
+    }catch(err){alert('Fichier invalide : '+err.message);}
+  };
+  input.click();
+}
+
 // ── INIT ──────────────────────────────────────────────────────
 initSW();
 
@@ -649,6 +768,7 @@ function useLocalFallback() {
 
 function initApp() {
   loadState();
+  loadCharges();
   openDetail.add(`${curSeance}-${cursor.ei}`);
   document.querySelectorAll('.snav-btn').forEach((b,i)=>b.classList.toggle('active',i===curSeance));
   renderSeance();
