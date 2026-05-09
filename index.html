@@ -652,16 +652,17 @@ async function loadProgramme() {
   // Si URL configurée → charger depuis le NAS
   if (programmeUrl) {
     try {
-      const r = await fetch(programmeUrl, {credentials:'include'});
+      const r = await fetch(programmeUrl, {headers: wdHeaders()});
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       seances = data.seances;
+      localStorage.setItem('fb_programme_cache', JSON.stringify(data));
       return true;
     } catch(e) {
       console.warn('Impossible de charger le programme depuis le NAS:', e);
     }
   }
-  // Fallback : programme embarqué en cache localStorage
+  // Fallback : programme en cache localStorage
   const cached = localStorage.getItem('fb_programme_cache');
   if (cached) {
     seances = JSON.parse(cached).seances;
@@ -702,10 +703,6 @@ async function saveSetupUrl() {
   localStorage.setItem('fb_programme_url', programmeUrl);
   const ok = await loadProgramme();
   if (ok) {
-    // Mettre en cache pour mode hors ligne
-    const r = await fetch(programmeUrl, {credentials:'include'});
-    const data = await r.json();
-    localStorage.setItem('fb_programme_cache', JSON.stringify(data));
     hideSetup();
     try {
       const d = JSON.parse(localStorage.getItem('fb_programme_cache') || '{}');
