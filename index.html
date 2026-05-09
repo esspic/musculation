@@ -710,6 +710,9 @@ async function saveSetupUrl() {
       if (d.meta && d.meta.soustitre) document.getElementById('appSoustitre').textContent = d.meta.soustitre;
     } catch(e) {}
     initApp();
+  } else if (seances) {
+    // App déjà chargée (config rouvert) — on ferme sans refaire d'init
+    hideSetup();
   } else {
     alert('Impossible de charger le programme. Vérifie l\'URL et que Tailscale est actif.');
   }
