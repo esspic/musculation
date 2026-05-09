@@ -102,19 +102,14 @@
   <div style="font-family:'Bebas Neue',sans-serif;font-size:2rem;color:#fff;margin-bottom:0.5rem;">MUSCULATION</div>
   <div style="color:#888;font-size:0.85rem;margin-bottom:2rem;text-align:center;">Premier lancement — configure l'accès au programme</div>
   <div style="width:100%;max-width:360px;">
-    <label style="color:#aaa;font-size:0.75rem;font-weight:600;display:block;margin-bottom:0.4rem;">URL WebDAV du programme (NAS)</label>
-    <input id="setup-url" type="url" placeholder="http://100.x.x.x:5006/muscu/programmes/programme_fullbody_nov2025.json"
-      style="width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;padding:0.7rem;font-size:0.85rem;margin-bottom:1rem;">
-    <div style="border-top:1px solid #222;padding-top:0.9rem;margin-bottom:1rem;">
-      <div style="color:#666;font-size:0.68rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:0.7rem;">Accès données — charges &amp; historique</div>
-      <input id="setup-base" type="url" placeholder="https://nas-syno.tail87964f.ts.net:5006/muscu/"
-        style="width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;padding:0.7rem;font-size:0.85rem;margin-bottom:0.5rem;">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
-        <input id="setup-wduser" type="text" placeholder="Utilisateur"
-          style="background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;padding:0.7rem;font-size:0.85rem;box-sizing:border-box;">
-        <input id="setup-wdpass" type="password" placeholder="Mot de passe"
-          style="background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;padding:0.7rem;font-size:0.85rem;box-sizing:border-box;">
-      </div>
+    <label style="color:#aaa;font-size:0.75rem;font-weight:600;display:block;margin-bottom:0.4rem;">URL du NAS</label>
+    <input id="setup-base" type="url" placeholder="https://nas-syno.tail87964f.ts.net:5006/muscu/"
+      style="width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;padding:0.7rem;font-size:0.85rem;margin-bottom:0.5rem;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:1rem;">
+      <input id="setup-wduser" type="text" placeholder="Utilisateur"
+        style="background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;padding:0.7rem;font-size:0.85rem;box-sizing:border-box;">
+      <input id="setup-wdpass" type="password" placeholder="Mot de passe"
+        style="background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;padding:0.7rem;font-size:0.85rem;box-sizing:border-box;">
     </div>
     <button onclick="saveSetupUrl()" style="width:100%;background:#e8001d;color:#fff;border:none;border-radius:8px;padding:0.8rem;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:0.05em;cursor:pointer;">CONNECTER</button>
     <div style="text-align:center;margin-top:0.8rem;display:flex;justify-content:center;gap:1.5rem;">
@@ -677,10 +672,8 @@ async function loadProgramme() {
 }
 
 function showSetup(fromApp) {
-  const su=document.getElementById('setup-url');
   const sb=document.getElementById('setup-base');
   const swu=document.getElementById('setup-wduser');
-  if(programmeUrl) su.value=programmeUrl;
   const b=localStorage.getItem('fb_webdav_base');
   const u=localStorage.getItem('fb_webdav_user');
   if(b) sb.value=b;
@@ -697,16 +690,16 @@ function hideSetup() {
 }
 
 async function saveSetupUrl() {
-  const url = document.getElementById('setup-url').value.trim();
-  if (!url) return;
-  programmeUrl = url;
-  localStorage.setItem('fb_programme_url', url);
   const base=document.getElementById('setup-base').value.trim();
+  if (!base) return;
+  const baseSlash=base.endsWith('/')?base:base+'/';
+  localStorage.setItem('fb_webdav_base', baseSlash);
   const wduser=document.getElementById('setup-wduser').value.trim();
   const wdpass=document.getElementById('setup-wdpass').value;
-  if(base) localStorage.setItem('fb_webdav_base', base.endsWith('/')?base:base+'/');
   if(wduser) localStorage.setItem('fb_webdav_user', wduser);
   if(wdpass) localStorage.setItem('fb_webdav_pass', wdpass);
+  programmeUrl = baseSlash+'programmes/current.json';
+  localStorage.setItem('fb_programme_url', programmeUrl);
   const ok = await loadProgramme();
   if (ok) {
     // Mettre en cache pour mode hors ligne
