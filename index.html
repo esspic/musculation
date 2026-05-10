@@ -648,6 +648,7 @@ function buildHistEntry(){
 let seances = null;
 let programmeUrl = localStorage.getItem('fb_programme_url') || '';
 
+let lastLoadError = '';
 async function loadProgramme() {
   // Si URL configurée → charger depuis le NAS
   if (programmeUrl) {
@@ -659,7 +660,8 @@ async function loadProgramme() {
       localStorage.setItem('fb_programme_cache', JSON.stringify(data));
       return true;
     } catch(e) {
-      console.warn('Impossible de charger le programme depuis le NAS:', e);
+      lastLoadError = e.message + '\n→ ' + programmeUrl;
+      console.warn('loadProgramme:', lastLoadError);
     }
   }
   // Fallback : programme en cache localStorage
@@ -714,7 +716,7 @@ async function saveSetupUrl() {
     // App déjà chargée (config rouvert) — on ferme sans refaire d'init
     hideSetup();
   } else {
-    alert('Impossible de charger le programme. Vérifie l\'URL et que Tailscale est actif.');
+    alert('Impossible de charger le programme.\n\n' + (lastLoadError || 'Erreur inconnue') + '\n\nVérifie que Tailscale est actif.');
   }
 }
 
