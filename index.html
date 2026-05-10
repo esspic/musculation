@@ -779,7 +779,7 @@ function initApp() {
     // Mettre à jour le cache si chargé depuis le NAS
     if (programmeUrl) {
       try {
-        const r = await fetch(programmeUrl, {credentials:'include'});
+        const r = await fetch(programmeUrl, {headers: wdHeaders()});
         const data = await r.json();
         localStorage.setItem('fb_programme_cache', JSON.stringify(data));
       } catch(e) {}
