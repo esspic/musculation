@@ -35,13 +35,13 @@
   .content{flex:1;overflow-y:auto;padding:0.5rem;display:flex;flex-direction:column;gap:0.35rem;}
   .content::-webkit-scrollbar{display:none;}
 
-  .s-hdr{background:linear-gradient(135deg,var(--card) 0%,#1e1010 100%);border:1px solid var(--border);border-radius:8px;padding:0.45rem 0.7rem;}
+  .s-hdr{background:linear-gradient(135deg,var(--card) 0%,#1e1010 100%);border:1px solid var(--border);border-radius:8px;padding:0.45rem 0.7rem;flex-shrink:0;}
   .s-hdr h2{font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:0.04em;}
   .s-hdr p{font-size:0.65rem;color:var(--muted);margin-top:0.05rem;}
 
-  .bloc-title{font-family:'Bebas Neue',sans-serif;font-size:0.72rem;letter-spacing:0.15em;color:var(--red);padding-left:0.5rem;border-left:3px solid var(--red);}
+  .bloc-title{font-family:'Bebas Neue',sans-serif;font-size:0.72rem;letter-spacing:0.15em;color:var(--red);padding-left:0.5rem;border-left:3px solid var(--red);flex-shrink:0;}
 
-  .ex-card{background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden;transition:border-color 0.2s;}
+  .ex-card{background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden;transition:border-color 0.2s;flex-shrink:0;}
   .ex-card.is-active{border-color:var(--red);background:#1c1010;}
   .ex-card.is-done{border-color:var(--green);opacity:0.5;}
 
@@ -103,7 +103,7 @@
   <div style="color:#888;font-size:0.85rem;margin-bottom:2rem;text-align:center;">Premier lancement — configure l'accès au programme</div>
   <div style="width:100%;max-width:360px;">
     <label style="color:#aaa;font-size:0.75rem;font-weight:600;display:block;margin-bottom:0.4rem;">URL du NAS</label>
-    <input id="setup-base" type="url" placeholder="https://mon-nas:5008/muscu/"
+    <input id="setup-base" type="url" placeholder="https://nas-syno.tail87964f.ts.net:5008/muscu/"
       style="width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;padding:0.7rem;font-size:0.85rem;margin-bottom:0.5rem;">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:1rem;">
       <input id="setup-wduser" type="text" placeholder="Utilisateur"
@@ -163,7 +163,8 @@
 // ── DATA ──────────────────────────────────────────────────────
 
 // ── STATE ─────────────────────────────────────────────────────
-let curSeance=0, setsState={}, openDetail=new Set(), cursor={ei:1,si:0};
+let curSeance=0, setsState={}, openDetail=new Set(), cursor={ei:1,si:0}, seanceStates={};
+let lastTapMs=0;
 
 function saveState(){
   try{
@@ -232,9 +233,27 @@ async function sendNotif(title, body) {
     new Notification(title, { body, silent: false });
   }
 }
+function restNotifMsg(){
+  const exs=seances[curSeance].exercices;
+  const nextEx=exs[cursor.ei];
+  const nextName=nextEx?nextEx.name:'Séance terminée 🎉';
+  return {title:"💪 C'est parti !", body:`${nextName} — série ${cursor.si+1}`};
+}
+function scheduleRestNotif(whenMs){
+  if(!(swReg&&swReg.active))return;
+  if(Notification.permission!=='granted')return;
+  const m=restNotifMsg();
+  swReg.active.postMessage({type:'SCHEDULE',when:whenMs,title:m.title,body:m.body});
+}
+function cancelRestNotif(){
+  if(swReg&&swReg.active)swReg.active.postMessage({type:'CANCEL'});
+}
+let wakeLock=null;
+async function acquireWake(){try{if('wakeLock' in navigator){wakeLock=await navigator.wakeLock.request('screen');}}catch(e){}}
+function releaseWake(){try{if(wakeLock){wakeLock.release();wakeLock=null;}}catch(e){}}
 
 // ── TIMER ─────────────────────────────────────────────────────
-let tDur=120,tRem=120,tRunning=false,tInterval=null,audioCtx=null;
+let tDur=120,tRem=120,tRunning=false,tInterval=null,tStart=0,tRemAtStart=0,audioCtx=null;
 
 function getAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx;}
 
@@ -271,16 +290,16 @@ function playDone() {
 }
 
 function setPreset(s,btn){
-  tDur=s;tRem=s;tRunning=false;clearInterval(tInterval);
+  tDur=s;tRem=s;tRunning=false;clearInterval(tInterval);cancelRestNotif();releaseWake();
   document.querySelectorAll('.preset').forEach(b=>b.classList.remove('sel'));
   btn.classList.add('sel');
   updateTimerUI();setBtn('DÉMARRER');setStatus('En attente');
 }
 function toggleTimer(){
-  if(tRunning){tRunning=false;clearInterval(tInterval);setBtn('REPRENDRE');setStatus('Pause');}
-  else{if(tRem<=0)tRem=tDur;tRunning=true;setBtn('PAUSE');setStatus('Repos…');tInterval=setInterval(tick,1000);}
+  if(tRunning){tRunning=false;clearInterval(tInterval);cancelRestNotif();releaseWake();setBtn('REPRENDRE');setStatus('Pause');}
+  else{if(tRem<=0)tRem=tDur;tStart=Date.now();tRemAtStart=tRem;tRunning=true;setBtn('PAUSE');setStatus('Repos…');tInterval=setInterval(tick,1000);scheduleRestNotif(Date.now()+tRem*1000);acquireWake();}
 }
-function resetTimer(){tRunning=false;clearInterval(tInterval);tRem=tDur;updateTimerUI();setBtn('DÉMARRER');setStatus('En attente');}
+function resetTimer(){tRunning=false;clearInterval(tInterval);cancelRestNotif();releaseWake();tRem=tDur;updateTimerUI();setBtn('DÉMARRER');setStatus('En attente');}
 function handleStartBtn(){
   // Si le timer est en cours → pause/reprendre
   if(tRunning){ toggleTimer(); return; }
@@ -290,22 +309,35 @@ function handleStartBtn(){
   tapSet(cursor.ei, cursor.si);
 }
 
-function tick(){
-  tRem--;
-  if(tRem<=0){
-    tRem=0;tRunning=false;clearInterval(tInterval);
-    setBtn('DÉMARRER');setStatus("C'est parti ! 💪");
-    playDone();
-    if(navigator.vibrate)navigator.vibrate([300,150,300,150,600]);
-    // Notification → montre
-    const exs=seances[curSeance].exercices;
-    const nextEx=exs[cursor.ei];
-    const nextName=nextEx?nextEx.name:'Séance terminée 🎉';
-    sendNotif("💪 C'est parti !", `${nextName} — série ${cursor.si+1}`);
-    onTimerDone();
-  }
+function timerExpired(){
+  tRem=0;tRunning=false;clearInterval(tInterval);
+  setBtn('DÉMARRER');setStatus("C'est parti ! 💪");
+  playDone();
+  if(navigator.vibrate)navigator.vibrate([300,150,300,150,600]);
+  const exs=seances[curSeance].exercices;
+  const nextEx=exs[cursor.ei];
+  const nextName=nextEx?nextEx.name:'Séance terminée 🎉';
+  sendNotif("💪 C'est parti !", `${nextName} — série ${cursor.si+1}`);
   updateTimerUI();
+  releaseWake();
+  onTimerDone();
 }
+
+function tick(){
+  const elapsed=Math.round((Date.now()-tStart)/1000);
+  tRem=Math.max(0,tRemAtStart-elapsed);
+  if(tRem<=0){timerExpired();}
+  else{updateTimerUI();}
+}
+
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&tRunning){
+    const elapsed=Math.round((Date.now()-tStart)/1000);
+    tRem=Math.max(0,tRemAtStart-elapsed);
+    if(tRem<=0){timerExpired();}
+    else{updateTimerUI();acquireWake();}
+  }
+});
 
 function onTimerDone(){
   // Le tap a déjà coché la série et avancé le curseur.
@@ -345,9 +377,17 @@ function setStatus(t){document.getElementById('tStatus').textContent=t;}
 
 // ── RENDER ────────────────────────────────────────────────────
 function showSeance(idx){
-  curSeance=idx;cursor={ei:1,si:0};
-  openDetail.clear();
-  openDetail.add(`${idx}-1`);
+  if(idx===curSeance){renderSeance();return;}
+  seanceStates[curSeance]={cursor:{ei:cursor.ei,si:cursor.si},openDetail:new Set(openDetail)};
+  curSeance=idx;
+  if(seanceStates[idx]){
+    cursor={ei:seanceStates[idx].cursor.ei,si:seanceStates[idx].cursor.si};
+    openDetail=new Set(seanceStates[idx].openDetail);
+  }else{
+    cursor={ei:1,si:0};
+    openDetail.clear();
+    openDetail.add(`${idx}-1`);
+  }
   document.querySelectorAll('.snav-btn').forEach((b,i)=>b.classList.toggle('active',i===idx));
   renderSeance();
 }
@@ -500,6 +540,9 @@ function skipExercice(ei) {
 }
 
 function tapSet(ei,si){
+  const now=Date.now();
+  if(now-lastTapMs<400)return;
+  lastTapMs=now;
   const key=`${curSeance}-${ei}-${si}`,wasDone=!!setsState[key];
   setsState[key]=!wasDone;
   if(!wasDone){
@@ -604,10 +647,10 @@ async function wdPut(path,data){
 async function loadCharges(){
   const data=await wdGet('data/charges.json');
   if(!data)return;
+  Object.keys(localStorage).filter(k=>k.startsWith('charge-')).forEach(k=>localStorage.removeItem(k));
   Object.entries(data).forEach(([si,exs])=>{
     Object.entries(exs).forEach(([ei,val])=>{
-      const k=`charge-${si}-${ei}`;
-      if(!localStorage.getItem(k))localStorage.setItem(k,val);
+      localStorage.setItem(`charge-${si}-${ei}`,val);
     });
   });
 }
@@ -648,7 +691,6 @@ function buildHistEntry(){
 let seances = null;
 let programmeUrl = localStorage.getItem('fb_programme_url') || '';
 
-let lastLoadError = '';
 async function loadProgramme() {
   // Si URL configurée → charger depuis le NAS
   if (programmeUrl) {
@@ -660,8 +702,7 @@ async function loadProgramme() {
       localStorage.setItem('fb_programme_cache', JSON.stringify(data));
       return true;
     } catch(e) {
-      lastLoadError = e.message + '\n→ ' + programmeUrl;
-      console.warn('loadProgramme:', lastLoadError);
+      console.warn('Impossible de charger le programme depuis le NAS:', e);
     }
   }
   // Fallback : programme en cache localStorage
@@ -716,7 +757,7 @@ async function saveSetupUrl() {
     // App déjà chargée (config rouvert) — on ferme sans refaire d'init
     hideSetup();
   } else {
-    alert('Impossible de charger le programme.\n\n' + (lastLoadError || 'Erreur inconnue') + '\n\nVérifie que Tailscale est actif.');
+    alert('Impossible de charger le programme. Vérifie l\'URL et que Tailscale est actif.');
   }
 }
 
@@ -781,7 +822,7 @@ function initApp() {
     // Mettre à jour le cache si chargé depuis le NAS
     if (programmeUrl) {
       try {
-        const r = await fetch(programmeUrl, {headers: wdHeaders()});
+        const r = await fetch(programmeUrl, {credentials:'include'});
         const data = await r.json();
         localStorage.setItem('fb_programme_cache', JSON.stringify(data));
       } catch(e) {}
