@@ -2,6 +2,7 @@
 // Rôle : programmer la notification de fin de repos À L'AVANCE, pour qu'Android
 // la déclenche tout seul même si Chrome est en arrière-plan / sur une autre appli.
 const TAG = 'rest-timer';
+let fallbackTimer = null; // setTimeout de repli — doit être annulable (pause/reset/nouveau repos)
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
@@ -24,12 +25,14 @@ self.addEventListener('message', (e) => {
       show(d.title, d.body, { showTrigger: new TimestampTrigger(d.when) }).catch(() => {});
     } else {
       // Repli : setTimeout côté SW (best-effort, peut être tué au-delà de ~30 s)
+      if (fallbackTimer) clearTimeout(fallbackTimer); // un seul repos programmé à la fois
       const delay = Math.max(0, d.when - Date.now());
-      setTimeout(() => show(d.title, d.body), delay);
+      fallbackTimer = setTimeout(() => { fallbackTimer = null; show(d.title, d.body); }, delay);
     }
   } else if (d.type === 'NOTIFY') {
     show(d.title, d.body, { renotify: false });
   } else if (d.type === 'CANCEL') {
+    if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; } // sinon : notif fantôme après pause/reset
     self.registration.getNotifications({ tag: TAG, includeTriggered: true })
       .then((ns) => ns.forEach((n) => n.close()))
       .catch(() => {});
