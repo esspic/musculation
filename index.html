@@ -117,6 +117,7 @@
       <span onclick="importProgramme()" style="color:#555;font-size:0.75rem;cursor:pointer;text-decoration:underline;">Importer programme JSON</span>
       <span id="setup-close" onclick="hideSetup()" style="color:#555;font-size:0.75rem;cursor:pointer;text-decoration:underline;display:none;">Fermer</span>
     </div>
+    <div style="text-align:center;margin-top:1.2rem;color:#333;font-size:0.65rem;">v2026-06-11b</div>
   </div>
 </div>
 
@@ -255,7 +256,13 @@ function releaseWake(){try{if(wakeLock){wakeLock.release();wakeLock=null;}}catch
 // ── TIMER ─────────────────────────────────────────────────────
 let tDur=120,tRem=120,tRunning=false,tInterval=null,tStart=0,tRemAtStart=0,audioCtx=null;
 
-function getAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx;}
+function getAudio(){
+  if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  // Android/Chrome : un contexte créé hors geste utilisateur reste "suspended" → sons muets.
+  // On le réveille à chaque usage (les appels arrivent depuis des taps, donc c'est autorisé).
+  if(audioCtx.state==='suspended')audioCtx.resume();
+  return audioCtx;
+}
 
 // Petit bip de feedback (coche de série) — distinct de la cloche de fin de repos
 function beep(freq,dur){
@@ -527,6 +534,10 @@ function tapSet(ei,si){
   // true = série réelle ; 'test' = validée avec le repos 3s (correction/essai) → cochée dans l'UI
   // mais NON comptée dans le carnet de bord (cf. buildHistEntry)
   setsState[key]=wasDone?false:(tDur<30?'test':true);
+  // Date de la séance = le jour de la 1ʳᵉ série réelle cochée (pas le jour du reset,
+  // qui peut arriver plusieurs jours après en fin de cycle A/B/C)
+  if(!wasDone&&tDur>=30&&!localStorage.getItem(`fb_sdate-${curSeance}`))
+    localStorage.setItem(`fb_sdate-${curSeance}`,new Date().toISOString().slice(0,10));
   if(!wasDone){
     cursor={ei,si};
     advanceCursor();
@@ -564,7 +575,10 @@ function resetSeance(){
   // Carnet de bord : enregistrer seulement si au moins une série RÉELLE a été faite
   // (les séries 'test' au repos 3s ne comptent pas → un pur essai ne crée pas d'entrée)
   if(entry&&entry.exercices.some(e=>e.sets>0)) saveHistorique(entry);
-  setsState={};
+  // ⚠️ N'effacer QUE la séance affichée — l'usage réel est de reseter A, B, C l'un après
+  // l'autre en fin de cycle : un wipe global effaçait B et C avant leur enregistrement
+  Object.keys(setsState).filter(k=>k.startsWith(`${curSeance}-`)).forEach(k=>delete setsState[k]);
+  localStorage.removeItem(`fb_sdate-${curSeance}`);
   cursor={ei:1,si:0};
   resetTimer();
   openDetail.clear();
@@ -643,17 +657,44 @@ async function saveCharges(){
   }
   wdPut('data/charges.json',out);
 }
+// GET avec statut détaillé : il faut distinguer "fichier absent" (init légitime → liste vide)
+// de "erreur réseau" (→ surtout NE PAS réécrire le fichier, on écraserait tout l'historique)
+async function wdGetStatus(path){
+  const b=wdBase();if(!b)return{status:'error'};
+  try{
+    const r=await fetch(b+path,{headers:wdHeaders()});
+    if(r.status===404)return{status:'notfound'};
+    if(!r.ok)return{status:'error'};
+    return{status:'ok',data:await r.json()};
+  }catch(e){return{status:'error'};}
+}
+// File d'attente locale : l'entrée est TOUJOURS stockée localement d'abord, puis synchronisée.
+// Si le NAS est injoignable (Tailscale coupé à la salle), elle attend le prochain lancement.
+function pendingHist(){try{return JSON.parse(localStorage.getItem('fb_hist_pending')||'[]');}catch(e){return[];}}
 async function saveHistorique(entry){
+  const p=pendingHist();p.push(entry);
+  localStorage.setItem('fb_hist_pending',JSON.stringify(p));
+  flushHistorique();
+}
+async function flushHistorique(){
   const b=wdBase();if(!b)return;
-  const hist=await wdGet('data/historique.json')||[];
-  hist.push(entry);
-  wdPut('data/historique.json',hist);
+  const p=pendingHist();if(!p.length)return;
+  const r=await wdGetStatus('data/historique.json');
+  if(r.status==='error'){showToast('⏳ Séance en attente de sync');return;}
+  const hist=(r.status==='ok'&&Array.isArray(r.data))?r.data:[];
+  hist.push(...p);
+  if(await wdPut('data/historique.json',hist)){
+    localStorage.removeItem('fb_hist_pending');
+    showToast('✓ Séance enregistrée');
+  }else{
+    showToast('⏳ Séance en attente de sync');
+  }
 }
 function buildHistEntry(){
   if(!seances)return null;
   const s=seances[curSeance];if(!s)return null;
   return{
-    date:new Date().toISOString().slice(0,10),
+    date:localStorage.getItem(`fb_sdate-${curSeance}`)||new Date().toISOString().slice(0,10),
     seance:curSeance,seanceLabel:s.label,
     exercices:s.exercices.filter(ex=>!ex.isWarmup).map(ex=>{
       const ei=s.exercices.indexOf(ex);
@@ -784,6 +825,7 @@ function useLocalFallback() {
 function initApp() {
   loadState();
   loadCharges();
+  flushHistorique(); // rejouer les séances en attente de sync (enregistrées hors réseau)
   openDetail.add(`${curSeance}-${cursor.ei}`);
   document.querySelectorAll('.snav-btn').forEach((b,i)=>b.classList.toggle('active',i===curSeance));
   renderSeance();
